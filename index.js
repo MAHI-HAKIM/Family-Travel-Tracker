@@ -24,203 +24,136 @@ let users = [];
 
 let registeredUsers = await db.query("SELECT * FROM users", (err, res) => {
   if (err) {
-    console.error("Could not fetch data from DB", err.stack);
+    console.error("Could not fetch data from DataBase", err.stack);
   } else {
     registeredUsers = res.rows;
   }
 });
 
-function initializeUsers() {
-  users = registeredUsers.map((user) => ({ ...user })); // Copy users to avoid reference issues
+// Helper function to fetch all users from DB
+async function fetchAllUsers() {
+  const result = await db.query("SELECT * FROM users");
+  return result.rows;
 }
-
-async function getUserInfo(userID) {
-  try {
-    const visitedCountriesByUser = await fetchVisitedCountries(userID);
-    const userDetail = await getUserByID(userID);
-
-    // Use async/await correctly for the query
-    const result = await db.query("SELECT * FROM users");
-    const allUsers = result.rows; // Store all users from the query
-
-    // Create the userInfo object
-    const userInfo = {
-      visitedCountry: visitedCountriesByUser,
-      userDetails: userDetail,
-      allUsers: allUsers,
-    };
-
-    return userInfo;
-  } catch (err) {
-    console.error("Error fetching user info:", err);
-    throw err; // Re-throw the error if you need to handle it later
-  }
+// Initialize the users without duplications
+async function initializeUsers() {
+  const allUsers = await fetchAllUsers();
+  return allUsers.map((user) => ({ ...user })); // Avoid reference issues
 }
-
-async function checkUserVisited(userID, code) {
-  console.log(`CHECKING IF USER ${userID} VISITED ${code}`);
-
-  let visited = false;
-
-  try {
-    const result = await db.query(
-      "SELECT * FROM visited_countries WHERE user_id = $1 AND country_code = $2",
-      [userID, code] // Pass parameters in a single array
-    );
-
-    if (result.rows.length > 0) {
-      visited = true;
-      console.log(`HE visited ${code} before.`);
-    } else {
-      console.log(`He did not visit ${code} before.`);
-    }
-  } catch (error) {
-    console.error("Error checking visited countries:", error);
-  }
-
-  return visited;
+// Fetch a user by their ID
+async function getUserByID(userID) {
+  const result = await db.query("SELECT * FROM users WHERE id = $1", [userID]);
+  return result.rows[0] || null;
 }
-async function fetchVisitedCountries(clickedUserID) {
+// Fetch visited countries for a given user
+async function fetchVisitedCountries(userID) {
   const result = await db.query(
-    "SELECT country_code FROM visited_countries JOIN users ON users.id = user_id WHERE user_id = $1;",
-    [clickedUserID]
+    "SELECT country_code FROM visited_countries WHERE user_id = $1",
+    [userID]
   );
-  let countries = [];
-  result.rows.forEach((country) => {
-    countries.push(country.country_code);
-  });
-  return countries;
+  return result.rows.map((row) => row.country_code);
 }
-async function getUserByID(user_ID) {
-  try {
-    const result = await db.query("SELECT * FROM users WHERE id = $1", [
-      user_ID,
-    ]);
-    if (result.rows.length === 0) {
-      console.log("User not found");
-      return null;
-    }
-    console.log("User found:", result.rows[0]);
-    return result.rows[0];
-  } catch (err) {
-    console.error("Error fetching user by ID:", error);
-    throw error;
-  }
+// Check if the user has visited a country
+async function checkUserVisited(userID, countryCode) {
+  const result = await db.query(
+    "SELECT 1 FROM visited_countries WHERE user_id = $1 AND country_code = $2",
+    [userID, countryCode]
+  );
+  return result.rowCount > 0;
+}
+// Add a new visited country for the user
+async function addVisitedCountry(userID, countryCode) {
+  await db.query(
+    "INSERT INTO visited_countries (country_code, user_id) VALUES ($1, $2)",
+    [countryCode, userID]
+  );
+}
+// Fetch complete user info for rendering
+async function getUserInfo(userID) {
+  const allUsers = await initializeUsers();
+  const userDetails = await getUserByID(userID);
+  const visitedCountries = await fetchVisitedCountries(userID);
+
+  return { allUsers, userDetails, visitedCountries };
 }
 
-async function addVisitedCountry(userID, code) {
-  try {
-    await db.query(
-      "INSERT INTO visited_countries (country_code , user_id) VALUES ($1,$2)",
-      [code, userID]
-    );
-    console.log(`Added ${code} to user ${userID} successfully`);
-  } catch (err) {
-    console.error("Error adding visited country:", err);
-    throw err;
-  }
-}
+// Route: Home page
 app.get("/", async (req, res) => {
-  initializeUsers(); // Ensure users are initialized without duplication
-
-  const userInfo = await getUserInfo(users[0].id);
-
+  const userInfo = await getUserInfo(currentUserId);
   res.render("index.ejs", {
-    countries: userInfo.visitedCountry,
-    total: userInfo.visitedCountry.length,
+    countries: userInfo.visitedCountries,
+    total: userInfo.visitedCountries.length,
     users: userInfo.allUsers,
     color: userInfo.userDetails.color,
     currentUserId: userInfo.userDetails.id,
   });
 });
 
+// Route: Handle country addition
 app.post("/add", async (req, res) => {
-  const { country, userId } = req.body; // Get the country and userId from the form
-
-  // console.log(`Adding country: ${country} to user ID: ${userId}`);
+  const { country, userId } = req.body;
 
   try {
     const result = await db.query(
-      "SELECT country_code FROM countries WHERE LOWER(country_name) LIKE '%' || $1 || '%';",
+      "SELECT country_code FROM countries WHERE LOWER(country_name) LIKE '%' || $1 || '%'",
       [country.toLowerCase()]
     );
-    const data = result.rows[0];
-    // console.log("Fetched Country", data);
 
-    if (!data) {
+    const countryData = result.rows[0];
+    if (!countryData) {
       console.log("Invalid country name. Please try again.");
-
-      let userInfo = await getUserInfo(userId);
-
-      res.render("index.ejs", {
-        countries: userInfo.visitedCountry,
-        total: userInfo.visitedCountry.length,
-        users: userInfo.allUsers,
-        color: userInfo.userDetails.color,
-        currentUserId: userInfo.userDetails.id,
-      });
-    } else {
-      let visitedCountry = await checkUserVisited(userId, data.country_code);
-
-      if (visitedCountry) {
-        console.log("User already visited this country");
-        let userInfo = await getUserInfo(userId);
-        res.render("index.ejs", {
-          countries: userInfo.visitedCountry,
-          total: userInfo.visitedCountry.length,
-          users: userInfo.allUsers,
-          color: userInfo.userDetails.color,
-          currentUserId: userInfo.userDetails.id,
-        });
-      } else {
-        console.log("User not visited this country");
-        addVisitedCountry(userId, data.country_code);
-        let userInfo = await getUserInfo(userId);
-        res.render("index.ejs", {
-          countries: userInfo.visitedCountry,
-          total: userInfo.visitedCountry.length,
-          users: userInfo.allUsers,
-          color: userInfo.userDetails.color,
-          currentUserId: userInfo.userDetails.id,
-        });
-      }
+      return res.redirect("/"); // Redirect instead of re-rendering to avoid duplication
     }
+
+    const visited = await checkUserVisited(userId, countryData.country_code);
+    if (!visited) {
+      await addVisitedCountry(userId, countryData.country_code);
+      console.log(`Added ${countryData.country_code} to user ${userId}`);
+    } else {
+      console.log("User already visited this country.");
+    }
+
+    res.redirect("/"); // Refresh the page with updated data
   } catch (err) {
-    console.log("Unable to perform things here");
-    console.log(err);
+    console.error("Error adding country:", err);
+    res.redirect("/");
   }
 });
 
+// Route: Handle user selection
 app.post("/user", async (req, res) => {
-  const result = req.body.user; // Extract the 'user' value from req.body
+  const selectedUserId = req.body.user;
 
-  console.log("Submitted value:", result);
+  if (selectedUserId === "new") {
+    return res.render("new.ejs"); // Render new user creation page
+  }
 
-  if (result === "new") {
-    console.log("NEW TO BE CREATED");
-    return res.render("new.ejs"); // Render the page to add a new user
-  } else {
-    currentUserId = result;
+  currentUserId = selectedUserId;
+  res.redirect("/"); // Redirect to home with updated user context
+});
 
-    const userInfo = await getUserInfo(currentUserId);
+// Route: Handle new user creation
+app.post("/new", async (req, res) => {
+  const { name, color } = req.body;
 
-    console.log("user Visited Country ", userInfo.visitedCountry);
+  try {
+    const result = await db.query(
+      "INSERT INTO users (name, color) VALUES ($1, $2) RETURNING *",
+      [name, color]
+    );
 
-    res.render("index.ejs", {
-      countries: userInfo.visitedCountry,
-      total: userInfo.visitedCountry.length,
-      users: userInfo.allUsers,
-      color: userInfo.userDetails.color,
-      currentUserId: currentUserId,
-    });
+    const newUser = result.rows[0];
+    currentUserId = newUser.id;
+    console.log("Created new user:", newUser);
+
+    res.redirect("/"); // Redirect to home with the new user
+  } catch (err) {
+    console.error("Error creating new user:", err);
+    res.redirect("/new");
   }
 });
 
-app.post("/new", async (req, res) => {
-  //Hint: The RETURNING keyword can return the data that was inserted.
-  //https://www.postgresql.org/docs/current/dml-returning.html
-});
-
+// Start the server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
