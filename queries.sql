@@ -10,7 +10,6 @@ CREATE TABLE contact_detail (
   tel TEXT,
   address TEXT
 );
-
 -- Data --
 INSERT INTO student (first_name, last_name)
 VALUES ('Angela', 'Yu');

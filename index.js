@@ -20,16 +20,6 @@ app.use(express.static("public"));
 
 let currentUserId = 3;
 
-let users = [];
-
-let registeredUsers = await db.query("SELECT * FROM users", (err, res) => {
-  if (err) {
-    console.error("Could not fetch data from DataBase", err.stack);
-  } else {
-    registeredUsers = res.rows;
-  }
-});
-
 // Helper function to fetch all users from DB
 async function fetchAllUsers() {
   const result = await db.query("SELECT * FROM users");
@@ -76,7 +66,6 @@ async function getUserInfo(userID) {
 
   return { allUsers, userDetails, visitedCountries };
 }
-
 // Route: Home page
 app.get("/", async (req, res) => {
   const userInfo = await getUserInfo(currentUserId);
@@ -88,7 +77,6 @@ app.get("/", async (req, res) => {
     currentUserId: userInfo.userDetails.id,
   });
 });
-
 // Route: Handle country addition
 app.post("/add", async (req, res) => {
   const { country, userId } = req.body;
@@ -119,7 +107,6 @@ app.post("/add", async (req, res) => {
     res.redirect("/");
   }
 });
-
 // Route: Handle user selection
 app.post("/user", async (req, res) => {
   const selectedUserId = req.body.user;
@@ -131,7 +118,6 @@ app.post("/user", async (req, res) => {
   currentUserId = selectedUserId;
   res.redirect("/"); // Redirect to home with updated user context
 });
-
 // Route: Handle new user creation
 app.post("/new", async (req, res) => {
   const { name, color } = req.body;
@@ -141,18 +127,14 @@ app.post("/new", async (req, res) => {
       "INSERT INTO users (name, color) VALUES ($1, $2) RETURNING *",
       [name, color]
     );
-
-    const newUser = result.rows[0];
-    currentUserId = newUser.id;
+    currentUserId = result.rows[0].id;
     console.log("Created new user:", newUser);
-
     res.redirect("/"); // Redirect to home with the new user
   } catch (err) {
     console.error("Error creating new user:", err);
     res.redirect("/new");
   }
 });
-
 // Start the server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
